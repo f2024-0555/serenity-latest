@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: check if the requesting user is authenticated
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Helper: check if the requesting user is an admin
+    function isAdmin() {
+      return isAuth() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Helper: check if the requesting user is active (not blocked or pending)
+    function isActive() {
+      return isAuth() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active';
+    }
+
+    // USERS collection
+    match /users/{userId} {
+      // Anyone can create their own user document (on signup)
+      allow create: if isAuth() && request.auth.uid == userId;
+      // Users can read their own document; admins can read all
+      allow read: if isAuth() && (request.auth.uid == userId || isAdmin());
+      // Users can update their own lastLogin; admins can update anything
+      allow update: if isAuth() && (
+        (request.auth.uid == userId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastLogin']))
+        || isAdmin()
+      );
+      // Only admins can delete users
+      allow delete: if isAdmin();
+    }
+
+    // MEDIA collection
+    match /media/{mediaId} {
+      // Only active authenticated users can read media
+      allow read: if isAuth() && isActive();
+      // Only admins can create, update, delete media
+      allow create, update, delete: if isAdmin();
+    }
+
+    // CATEGORIES collection
+    match /categories/{categoryId} {
+      allow read: if isAuth() && isActive();
+      allow write: if isAdmin();
+    }
+
+    // FAVORITES collection
+    match /favorites/{favoriteId} {
+      allow read: if isAuth() && isActive();
+      // Users can only write their own favorites
+      allow create, delete: if isAuth() && isActive() &&
+        request.auth.uid == resource.data.userId;
+      allow create: if isAuth() && isActive() &&
+        request.auth.uid == request.resource.data.userId;
+    }
+
+    // HISTORY collection
+    match /history/{historyId} {
+      allow read: if isAuth() && isActive();
+      // Users can only write their own history
+      allow create, update: if isAuth() && isActive() &&
+        request.auth.uid == request.resource.data.userId;
+    }
+
+    // PLAYLISTS collection
+    match /playlists/{playlistId} {
+      allow read: if isAuth() && isActive();
+      allow create, update, delete: if isAuth() && isActive() &&
+        request.auth.uid == resource.data.createdBy;
+      allow create: if isAuth() && isActive() &&
+        request.auth.uid == request.resource.data.createdBy;
+    }
+  }
+}

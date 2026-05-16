@@ -1,0 +1,34 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper functions
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuth() &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isActive() {
+      return isAuth() &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.status == 'active';
+    }
+
+    // Media files - only admins upload, active users can read
+    match /media/{userId}/{fileName} {
+      allow read: if isAuth() && isActive();
+      allow create: if isAdmin() && request.resource.size < 500 * 1024 * 1024; // 500MB max
+      allow delete: if isAdmin();
+    }
+
+    // Thumbnail images - only admins upload, active users can read
+    match /thumbnails/{userId}/{fileName} {
+      allow read: if isAuth() && isActive();
+      allow create: if isAdmin() && request.resource.size < 5 * 1024 * 1024; // 5MB max
+      allow delete: if isAdmin();
+    }
+  }
+}
