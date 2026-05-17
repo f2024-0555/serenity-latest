@@ -9,13 +9,10 @@ import { getAllMedia, getUserFavorites, getUserHistory } from '@/lib/db';
 import { MediaItem, History } from '@/types';
 
 const CATEGORIES = [
-  { id: 'sleep', name: 'Sleep Meditation', icon: '🌙', color: 'from-blue-900/40 to-indigo-900/40' },
-  { id: 'relaxation', name: 'Relaxation', icon: '🌊', color: 'from-teal-900/40 to-cyan-900/40' },
-  { id: 'focus', name: 'Focus Music', icon: '🎯', color: 'from-purple-900/40 to-violet-900/40' },
-  { id: 'healing', name: 'Healing Sounds', icon: '✨', color: 'from-rose-900/40 to-pink-900/40' },
-  { id: 'nature', name: 'Nature Sounds', icon: '🌿', color: 'from-green-900/40 to-emerald-900/40' },
-  { id: 'guided', name: 'Guided Meditation', icon: '🧘', color: 'from-amber-900/40 to-orange-900/40' },
-  { id: 'video', name: 'Videos', icon: '▶️', color: 'from-red-900/40 to-rose-900/40' },
+  { id: 'walking', name: 'Walking Meditation', icon: '🚶', color: 'from-green-900/40 to-emerald-900/40' },
+  { id: 'kaleidoscope', name: 'Kaleidoscope', icon: '🔮', color: 'from-purple-900/40 to-violet-900/40' },
+  { id: 'lectures', name: 'Lectures', icon: '📖', color: 'from-blue-900/40 to-indigo-900/40' },
+  { id: 'guided', name: 'Guided Meditations', icon: '🧘', color: 'from-amber-900/40 to-orange-900/40' },
 ];
 
 const greetings = ['Good morning', 'Good afternoon', 'Good evening'];
