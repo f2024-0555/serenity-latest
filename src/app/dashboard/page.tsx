@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import AppLayout from '@/components/layout/AppLayout';
 import AuthGuard from '@/components/auth/AuthGuard';
@@ -15,12 +15,11 @@ const CATEGORIES = [
   { id: 'guided', name: 'Guided Meditations', icon: '🧘', color: 'from-amber-900/40 to-orange-900/40' },
 ];
 
-const greetings = ['Good morning', 'Good afternoon', 'Good evening'];
 const getGreeting = () => {
   const h = new Date().getHours();
-  if (h < 12) return greetings[0];
-  if (h < 18) return greetings[1];
-  return greetings[2];
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
 };
 
 export default function DashboardPage() {
@@ -29,6 +28,7 @@ export default function DashboardPage() {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [history, setHistory] = useState<History[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -46,16 +46,28 @@ export default function DashboardPage() {
   }, [user]);
 
   const recentIds = history.slice(0, 5).map((h) => h.mediaId);
-  const recentMedia = recentIds.map((id) => allMedia.find((m) => m.id === id)).filter(Boolean) as MediaItem[];
-  const featuredMedia = allMedia.slice(0, 6);
+  const recentMedia = recentIds
+    .map((id) => allMedia.find((m) => m.id === id))
+    .filter(Boolean) as MediaItem[];
 
-  const container = { hidden: {}, visible: { transition: { staggerChildren: 0.08 } } };
-  const item = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } };
+  const filteredMedia = selectedCategory
+    ? allMedia.filter((m) => m.category === selectedCategory)
+    : allMedia;
+
+  const container = {
+    hidden: {},
+    visible: { transition: { staggerChildren: 0.06 } },
+  };
+  const item = {
+    hidden: { opacity: 0, y: 20 },
+    visible: { opacity: 1, y: 0 },
+  };
 
   return (
     <AuthGuard>
       <AppLayout>
         <div className="p-6 lg:p-8 max-w-7xl mx-auto">
+
           {/* Hero */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -73,7 +85,6 @@ export default function DashboardPage() {
               <p className="text-moon/70 text-base max-w-md">
                 Find your inner peace. Your sanctuary awaits.
               </p>
-
               <div className="mt-6 flex gap-4">
                 <div className="text-center">
                   <p className="text-2xl font-medium text-star">{allMedia.length}</p>
@@ -96,7 +107,7 @@ export default function DashboardPage() {
           {/* Categories */}
           <section className="mb-10">
             <h2 className="text-lg font-medium text-star mb-4">Browse Categories</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {CATEGORIES.map((cat, i) => (
                 <motion.div
                   key={cat.id}
@@ -104,17 +115,30 @@ export default function DashboardPage() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05 }}
                   whileHover={{ scale: 1.03 }}
-                  className={`bg-gradient-to-br ${cat.color} border border-dusk/30 rounded-2xl p-4 cursor-pointer text-center hover:border-dusk/60 transition-all duration-200`}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() =>
+                    setSelectedCategory(
+                      selectedCategory === cat.name ? null : cat.name
+                    )
+                  }
+                  className={`bg-gradient-to-br ${cat.color} border rounded-2xl p-5 cursor-pointer text-center transition-all duration-200 ${
+                    selectedCategory === cat.name
+                      ? 'border-aurora shadow-lg shadow-aurora/20 scale-105'
+                      : 'border-dusk/30 hover:border-dusk/60'
+                  }`}
                 >
-                  <div className="text-2xl mb-2">{cat.icon}</div>
-                  <p className="text-xs font-medium text-moon leading-tight">{cat.name}</p>
+                  <div className="text-3xl mb-2">{cat.icon}</div>
+                  <p className="text-sm font-medium text-moon leading-tight">{cat.name}</p>
+                  {selectedCategory === cat.name && (
+                    <div className="mt-2 w-1.5 h-1.5 rounded-full bg-aurora mx-auto" />
+                  )}
                 </motion.div>
               ))}
             </div>
           </section>
 
           {/* Continue Listening */}
-          {recentMedia.length > 0 && (
+          {recentMedia.length > 0 && !selectedCategory && (
             <section className="mb-10">
               <h2 className="text-lg font-medium text-star mb-4">Continue Listening</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -124,59 +148,97 @@ export default function DashboardPage() {
                     item={m}
                     queue={recentMedia}
                     isFavorite={favorites.includes(m.id)}
-                    onFavoriteChange={() => setFavorites((f) => f.includes(m.id) ? f.filter((id) => id !== m.id) : [...f, m.id])}
+                    onFavoriteChange={() =>
+                      setFavorites((f) =>
+                        f.includes(m.id) ? f.filter((id) => id !== m.id) : [...f, m.id]
+                      )
+                    }
                   />
                 ))}
               </div>
             </section>
           )}
 
-          {/* Featured */}
-          {loading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[1,2,3,4,5,6].map((i) => (
-                <div key={i} className="rounded-xl overflow-hidden">
-                  <div className="aspect-video shimmer" />
-                  <div className="mt-3 space-y-2">
-                    <div className="h-4 shimmer rounded w-3/4" />
-                    <div className="h-3 shimmer rounded w-1/2" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <section>
-              <h2 className="text-lg font-medium text-star mb-4">
-                {allMedia.length > 0 ? 'All Sessions' : 'No media yet'}
+          {/* Media Grid */}
+          <section>
+            {/* Heading */}
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-medium text-star">
+                {selectedCategory ? selectedCategory : 'All Sessions'}
+                {selectedCategory && (
+                  <span className="text-sm text-twilight ml-2 font-normal">
+                    ({filteredMedia.length} sessions)
+                  </span>
+                )}
               </h2>
-              {allMedia.length === 0 ? (
-                <div className="text-center py-16 text-twilight">
-                  <svg className="w-16 h-16 mx-auto mb-4 text-dusk" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
-                  </svg>
-                  <p>No media uploaded yet. Visit the Admin panel to add content.</p>
-                </div>
-              ) : (
-                <motion.div
-                  variants={container}
-                  initial="hidden"
-                  animate="visible"
-                  className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+              {selectedCategory && (
+                <button
+                  onClick={() => setSelectedCategory(null)}
+                  className="text-sm text-aurora hover:text-aurora-light transition-colors flex items-center gap-1"
                 >
-                  {featuredMedia.map((m) => (
-                    <motion.div key={m.id} variants={item}>
-                      <MediaCard
-                        item={m}
-                        queue={allMedia}
-                        isFavorite={favorites.includes(m.id)}
-                        onFavoriteChange={() => setFavorites((f) => f.includes(m.id) ? f.filter((id) => id !== m.id) : [...f, m.id])}
-                      />
-                    </motion.div>
-                  ))}
-                </motion.div>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  Show All
+                </button>
               )}
-            </section>
-          )}
+            </div>
+
+            {/* Loading skeleton */}
+            {loading ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="rounded-xl overflow-hidden">
+                    <div className="aspect-video shimmer" />
+                    <div className="mt-3 space-y-2">
+                      <div className="h-4 shimmer rounded w-3/4" />
+                      <div className="h-3 shimmer rounded w-1/2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : filteredMedia.length === 0 ? (
+              <div className="text-center py-20 text-twilight">
+                <div className="text-5xl mb-4">
+                  {selectedCategory
+                    ? CATEGORIES.find((c) => c.name === selectedCategory)?.icon || '🔍'
+                    : '🎵'}
+                </div>
+                <p className="text-star font-medium mb-1">
+                  {selectedCategory ? `No ${selectedCategory} yet` : 'No media yet'}
+                </p>
+                <p className="text-sm">
+                  {selectedCategory
+                    ? 'Upload some files in this category from the Admin panel.'
+                    : 'Visit the Admin panel to upload your first file.'}
+                </p>
+              </div>
+            ) : (
+              <motion.div
+                variants={container}
+                initial="hidden"
+                animate="visible"
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+              >
+                {filteredMedia.map((m) => (
+                  <motion.div key={m.id} variants={item}>
+                    <MediaCard
+                      item={m}
+                      queue={filteredMedia}
+                      isFavorite={favorites.includes(m.id)}
+                      onFavoriteChange={() =>
+                        setFavorites((f) =>
+                          f.includes(m.id)
+                            ? f.filter((id) => id !== m.id)
+                            : [...f, m.id]
+                        )
+                      }
+                    />
+                  </motion.div>
+                ))}
+              </motion.div>
+            )}
+          </section>
         </div>
       </AppLayout>
     </AuthGuard>
