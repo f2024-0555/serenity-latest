@@ -19,10 +19,10 @@ export interface MediaItem {
   description: string;
   type: MediaType;
   category: string;
-  url: string;
+  url: string;          // Cloudinary URL or YouTube embed URL
   thumbnailUrl: string;
-  duration: number; // seconds
-  fileSize: number; // bytes
+  duration: number;     // seconds (0 for YouTube videos)
+  fileSize: number;     // bytes
   uploadedBy: string;
   createdAt: string;
   playCount: number;

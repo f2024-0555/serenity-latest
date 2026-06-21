@@ -1,353 +1,533 @@
 'use client';
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useState, useCallback } from 'react';
+import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
-import { usePlayerStore } from '@/lib/player-store';
+import { uploadToCloudinary } from '@/lib/cloudinary';
+import { addMedia } from '@/lib/db';
 import { useAuth } from '@/lib/auth-context';
-import { saveProgress, incrementPlayCount } from '@/lib/db';
+import toast from 'react-hot-toast';
 
-export default function AudioPlayer() {
-  const audioRef = useRef<HTMLAudioElement>(null);
+const CATEGORIES = [
+  'Walking Meditation', 'Kaleidoscope', 'Lectures', 'Guided Meditations',
+];
+
+type Tab = 'audio' | 'video' | 'long';
+
+interface Props { onSuccess: () => void; }
+
+export default function UploadMedia({ onSuccess }: Props) {
   const { user } = useAuth();
-  const {
-    currentMedia, isPlaying, currentTime, duration, volume, isMuted,
-    shuffle, repeat, playbackSpeed,
-    setIsPlaying, setCurrentTime, setDuration, setVolume,
-    togglePlay, toggleMute, toggleShuffle, cycleRepeat, setPlaybackSpeed,
-    nextTrack, prevTrack, closePlayer,
-  } = usePlayerStore();
 
-  const [showFullPlayer, setShowFullPlayer] = useState(false);
+  // File state
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [longFile, setLongFile] = useState<File | null>(null);
+  const [thumbFile, setThumbFile] = useState<File | null>(null);
+  const [thumbPreview, setThumbPreview] = useState('');
 
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || !currentMedia) return;
-    audio.src = currentMedia.url;
-    audio.load();
-    if (isPlaying) audio.play().catch(() => {});
-    incrementPlayCount(currentMedia.id);
-  }, [currentMedia]);
+  // Progress state
+  const [audioProgress, setAudioProgress] = useState(0);
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [longProgress, setLongProgress] = useState(0);
+  const [thumbProgress, setThumbProgress] = useState(0);
 
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (isPlaying) audio.play().catch(() => {});
-    else audio.pause();
-  }, [isPlaying]);
+  // Form state
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [category, setCategory] = useState(CATEGORIES[0]);
+  const [activeTab, setActiveTab] = useState<Tab>('audio');
+  const [uploading, setUploading] = useState(false);
+  const [uploadStage, setUploadStage] = useState('');
 
-  useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = isMuted ? 0 : volume;
-  }, [volume, isMuted]);
+  // ── Dropzone callbacks ─────────────────────────────────────────────────────
 
-  useEffect(() => {
-    if (audioRef.current) audioRef.current.playbackRate = playbackSpeed;
-  }, [playbackSpeed]);
+  const onDropAudio = useCallback((files: File[]) => {
+    const file = files[0];
+    if (!file) return;
+    setAudioFile(file);
+    if (!title) setTitle(file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '));
+  }, [title]);
 
-  const handleTimeUpdate = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    setCurrentTime(audio.currentTime);
-    if (currentMedia && user && Math.floor(audio.currentTime) % 15 === 0) {
-      saveProgress(user.uid, currentMedia.id, audio.currentTime, audio.currentTime >= audio.duration - 5);
+  const onDropVideo = useCallback((files: File[]) => {
+    const file = files[0];
+    if (!file) return;
+    setVideoFile(file);
+    if (!title) setTitle(file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '));
+  }, [title]);
+
+  const onDropLong = useCallback((files: File[]) => {
+    const file = files[0];
+    if (!file) return;
+    setLongFile(file);
+    if (!title) setTitle(file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '));
+  }, [title]);
+
+  const onDropThumb = useCallback((files: File[]) => {
+    const file = files[0];
+    if (!file) return;
+    setThumbFile(file);
+    setThumbPreview(URL.createObjectURL(file));
+  }, []);
+
+  // ── Dropzone hooks ─────────────────────────────────────────────────────────
+
+  const { getRootProps: getAudioProps, getInputProps: getAudioInput, isDragActive: audioDrag } =
+    useDropzone({
+      onDrop: onDropAudio,
+      accept: {
+        'audio/*': ['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac'],
+      },
+      maxFiles: 1,
+    });
+
+  const { getRootProps: getVideoProps, getInputProps: getVideoInput, isDragActive: videoDrag } =
+    useDropzone({
+      onDrop: onDropVideo,
+      accept: {
+        'video/*': ['.mp4', '.mov', '.webm', '.avi', '.mkv'],
+      },
+      maxFiles: 1,
+    });
+
+  const { getRootProps: getLongProps, getInputProps: getLongInput, isDragActive: longDrag } =
+    useDropzone({
+      onDrop: onDropLong,
+      accept: {
+        'video/*': ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.m4v'],
+      },
+      maxFiles: 1,
+    });
+
+  const { getRootProps: getThumbProps, getInputProps: getThumbInput, isDragActive: thumbDrag } =
+    useDropzone({
+      onDrop: onDropThumb,
+      accept: { 'image/*': [] },
+      maxFiles: 1,
+    });
+
+  // ── Upload handler ─────────────────────────────────────────────────────────
+
+  const handleUpload = async () => {
+    const mediaFile =
+      activeTab === 'audio' ? audioFile :
+      activeTab === 'video' ? videoFile :
+      longFile;
+
+    if (!mediaFile || !title.trim() || !user) {
+      toast.error('Please add a file and a title.');
+      return;
     }
-  }, [currentMedia, user, setCurrentTime]);
+    setUploading(true);
 
-  const handleEnded = useCallback(() => {
-    if (repeat === 'one') audioRef.current?.play();
-    else nextTrack();
-  }, [repeat, nextTrack]);
+    try {
+      // 1. Upload thumbnail (all tabs support it)
+      let thumbUrl = '';
+      if (thumbFile) {
+        setUploadStage('Uploading thumbnail…');
+        const r = await uploadToCloudinary(thumbFile, setThumbProgress, 'image');
+        thumbUrl = r.secureUrl;
+      }
 
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const t = parseFloat(e.target.value);
-    setCurrentTime(t);
-    if (audioRef.current) audioRef.current.currentTime = t;
+      let mediaUrl = '';
+      let duration = 0;
+      let fileSize = mediaFile.size;
+
+      if (activeTab === 'long') {
+       
+
+      } else {
+        // ── Cloudinary path (audio / short video) ─────────────────────────
+        const isVideo = activeTab === 'video';
+        setUploadStage(isVideo ? 'Uploading video…' : 'Uploading audio…');
+        const setProgress = isVideo ? setVideoProgress : setAudioProgress;
+        const mediaResult = await uploadToCloudinary(mediaFile, setProgress, 'auto');
+        mediaUrl = mediaResult.secureUrl;
+
+        // Get duration from browser
+        duration = await new Promise<number>((resolve) => {
+          const el = document.createElement(isVideo ? 'video' : 'audio');
+          el.preload = 'metadata';
+          el.src = URL.createObjectURL(mediaFile);
+          el.onloadedmetadata = () => resolve(el.duration || 0);
+          el.onerror = () => resolve(mediaResult.duration || 0);
+          setTimeout(() => resolve(mediaResult.duration || 0), 5000);
+        });
+      }
+
+      // 2. Save to Firestore
+      setUploadStage('Saving to library…');
+      await addMedia({
+        title: title.trim(),
+        description: description.trim(),
+        // Long videos are stored as 'video' type but URL is an embed URL
+        type: activeTab === 'audio' ? 'audio' : 'video',
+        category,
+        url: mediaUrl,
+        thumbnailUrl: thumbUrl,
+        duration,
+        fileSize,
+        uploadedBy: user.uid,
+        createdAt: new Date().toISOString(),
+        playCount: 0,
+        tags: activeTab === 'long' ? ['bunny', 'long-video'] : [],
+      });
+
+      toast.success('Uploaded successfully! 🎉');
+
+      // Reset all state
+      setAudioFile(null);
+      setVideoFile(null);
+      setLongFile(null);
+      setThumbFile(null);
+      setThumbPreview('');
+      setTitle('');
+      setDescription('');
+      setCategory(CATEGORIES[0]);
+      setAudioProgress(0);
+      setVideoProgress(0);
+      setLongProgress(0);
+      setThumbProgress(0);
+      setUploadStage('');
+      onSuccess();
+
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || 'Upload failed. Please try again.');
+    } finally {
+      setUploading(false);
+      setUploadStage('');
+    }
   };
 
-  const skip = (seconds: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const newTime = Math.min(Math.max(audio.currentTime + seconds, 0), duration);
-    audio.currentTime = newTime;
-    setCurrentTime(newTime);
-  };
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
-  const formatTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = Math.floor(s % 60);
-    return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-  };
+  const formatSize = (b: number) =>
+    b < 1024 * 1024 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`;
 
-  if (!currentMedia) return null;
+  const currentFile = activeTab === 'audio' ? audioFile : activeTab === 'video' ? videoFile : longFile;
+  const currentProgress = activeTab === 'audio' ? audioProgress : activeTab === 'video' ? videoProgress : longProgress;
 
-  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const tabs: { id: Tab; label: string; emoji: string; desc: string }[] = [
+    { id: 'audio', label: 'Audio', emoji: '🎵', desc: 'MP3 · WAV · M4A · AAC · OGG · FLAC' },
+    { id: 'video', label: 'Video', emoji: '🎥', desc: 'MP4 · MOV · WebM · AVI · MKV (≤ ~2 GB)' },
+    { id: 'long', label: 'Long Video', emoji: '🎬', desc: 'MP4 · MOV · WebM · AVI · MKV · M4V (via Bunny Stream, no size limit)' },
+  ];
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <>
-      <audio
-        ref={audioRef}
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={(e) => setDuration((e.target as HTMLAudioElement).duration)}
-        onEnded={handleEnded}
-      />
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-medium text-star">Upload Media</h2>
+        <p className="text-sm text-twilight mt-1">
+          Audio &amp; short video → Cloudinary (25 GB free) · Long video → Bunny Stream
+        </p>
+      </div>
 
-      {/* Full Screen Player */}
-      <AnimatePresence>
-        {showFullPlayer && (
-          <motion.div
-            initial={{ y: '100%' }}
-            animate={{ y: 0 }}
-            exit={{ y: '100%' }}
-            transition={{ type: 'spring', damping: 30, stiffness: 250 }}
-            className="fixed inset-0 z-50 flex flex-col"
-            style={{ background: 'linear-gradient(180deg, #0d0d1a 0%, #07070f 100%)' }}
+      {/* Tab selector */}
+      <div className="flex bg-ink border border-dusk rounded-xl p-1 gap-1 w-fit flex-wrap">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
+            className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${
+              activeTab === t.id ? 'bg-aurora text-white shadow-md' : 'text-twilight hover:text-moon'
+            }`}
           >
-            {/* Blurred background from thumbnail */}
-            {currentMedia.thumbnailUrl && (
-              <div
-                className="absolute inset-0 opacity-15"
-                style={{
-                  backgroundImage: `url(${currentMedia.thumbnailUrl})`,
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                  filter: 'blur(60px)',
-                  transform: 'scale(1.2)',
-                }}
-              />
-            )}
+            {t.emoji} {t.label}
+          </button>
+        ))}
+      </div>
 
-            {/* Header */}
-            <div className="relative z-10 flex items-center justify-between px-6 pt-12 pb-4">
-              <button
-                onClick={() => setShowFullPlayer(false)}
-                className="text-moon hover:text-star transition-colors"
-              >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              <p className="text-sm text-twilight font-medium uppercase tracking-widest">Now Playing</p>
-              <button onClick={closePlayer} className="text-twilight hover:text-star transition-colors">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Big Thumbnail */}
-            <div className="relative z-10 flex justify-center px-8 mt-4">
-              <motion.div
-                animate={{ scale: isPlaying ? 1 : 0.9 }}
-                transition={{ duration: 0.4, ease: 'easeOut' }}
-                className="w-full max-w-sm aspect-square rounded-3xl overflow-hidden shadow-2xl"
-                style={{ boxShadow: '0 30px 80px rgba(0,0,0,0.6)' }}
-              >
-                {currentMedia.thumbnailUrl ? (
-                  <img
-                    src={currentMedia.thumbnailUrl}
-                    alt={currentMedia.title}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-gradient-to-br from-nebula to-aurora flex items-center justify-center">
-                    <svg className="w-24 h-24 text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
-                    </svg>
-                  </div>
-                )}
-              </motion.div>
-            </div>
-
-            {/* Title & Category */}
-            <div className="relative z-10 px-8 mt-8 text-center">
-              <h2 className="text-2xl font-medium text-star leading-tight">{currentMedia.title}</h2>
-              <p className="text-twilight mt-2 text-sm uppercase tracking-widest">{currentMedia.category}</p>
-            </div>
-
-            {/* Progress Bar */}
-            <div className="relative z-10 px-8 mt-8">
-              <input
-                type="range"
-                min={0}
-                max={duration || 100}
-                value={currentTime}
-                onChange={handleSeek}
-                className="w-full cursor-pointer"
-                style={{
-                  height: '3px',
-                  background: `linear-gradient(to right, #ffffff ${progress}%, rgba(255,255,255,0.2) ${progress}%)`,
-                  WebkitAppearance: 'none',
-                  borderRadius: '2px',
-                }}
-              />
-              <div className="flex justify-between mt-2">
-                <span className="text-xs text-twilight">{formatTime(currentTime)}</span>
-                <span className="text-xs text-twilight">{formatTime(duration)}</span>
-              </div>
-            </div>
-
-            {/* Controls */}
-            <div className="relative z-10 px-8 mt-8">
-              <div className="flex items-center justify-between">
-                {/* Shuffle */}
-                <button
-                  onClick={toggleShuffle}
-                  className={`p-2 transition-colors ${shuffle ? 'text-aurora' : 'text-dusk hover:text-moon'}`}
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 3M21 7.5H7.5" />
-                  </svg>
-                </button>
-
-                {/* Skip back 10s */}
-                <button onClick={() => skip(-10)} className="text-moon hover:text-star transition-colors">
-                  <div className="relative">
-                    <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
-                    </svg>
-                    <span className="absolute inset-0 flex items-center justify-center text-xs font-bold mt-1">10</span>
-                  </div>
-                </button>
-
-                {/* Play/Pause */}
-                <button
-                  onClick={togglePlay}
-                  className="w-20 h-20 rounded-full bg-white flex items-center justify-center shadow-xl hover:scale-105 transition-transform active:scale-95"
-                >
-                  {isPlaying ? (
-                    <svg className="w-8 h-8 text-void" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                    </svg>
-                  ) : (
-                    <svg className="w-8 h-8 text-void ml-1" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                  )}
-                </button>
-
-                {/* Skip forward 10s */}
-                <button onClick={() => skip(10)} className="text-moon hover:text-star transition-colors">
-                  <div className="relative">
-                    <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 15l6-6m0 0l-6-6m6 6H9a6 6 0 000 12h3" />
-                    </svg>
-                    <span className="absolute inset-0 flex items-center justify-center text-xs font-bold mt-1">10</span>
-                  </div>
-                </button>
-
-                {/* Repeat */}
-                <button
-                  onClick={cycleRepeat}
-                  className={`p-2 transition-colors ${repeat !== 'none' ? 'text-aurora' : 'text-dusk hover:text-moon'}`}
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            {/* Volume */}
-            <div className="relative z-10 px-8 mt-8 flex items-center gap-3">
-              <svg className="w-4 h-4 text-twilight flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19.114 5.636a9 9 0 010 12.728M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-              </svg>
-              <input
-                type="range" min={0} max={1} step={0.01}
-                value={isMuted ? 0 : volume}
-                onChange={(e) => setVolume(parseFloat(e.target.value))}
-                className="flex-1"
-                style={{
-                  height: '3px',
-                  background: `linear-gradient(to right, rgba(255,255,255,0.8) ${(isMuted ? 0 : volume) * 100}%, rgba(255,255,255,0.2) ${(isMuted ? 0 : volume) * 100}%)`,
-                  WebkitAppearance: 'none',
-                  borderRadius: '2px',
-                }}
-              />
-              <svg className="w-5 h-5 text-twilight flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-              </svg>
+      {/* Bunny notice for Long Video */}
+      <AnimatePresence>
+        {activeTab === 'long' && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="flex items-start gap-3 p-4 rounded-xl bg-cosmos/10 border border-cosmos/30"
+          >
+            <span className="text-cosmos text-lg flex-shrink-0">🐰</span>
+            <div className="text-sm">
+              <p className="text-cosmos font-medium">Bunny Stream upload</p>
+              <p className="text-twilight mt-0.5">
+                Your video will be uploaded to Bunny Stream and played back via an embedded player.
+                Make sure <code className="text-moon bg-ink px-1 rounded">NEXT_PUBLIC_BUNNY_LIBRARY_ID</code> and{' '}
+                <code className="text-moon bg-ink px-1 rounded">NEXT_PUBLIC_BUNNY_API_KEY</code> are
+                set in your <code className="text-moon bg-ink px-1 rounded">.env.local</code>.
+              </p>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Mini Player Bar at bottom */}
-      <motion.div
-        initial={{ y: 100 }}
-        animate={{ y: 0 }}
-        exit={{ y: 100 }}
-        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-        className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/10"
-        style={{ background: 'rgba(7,7,15,0.97)' }}
-      >
-        {/* Progress line */}
-        <div className="h-0.5 bg-white/10">
-          <div
-            className="h-full bg-white/60 transition-all duration-100"
-            style={{ width: `${progress}%` }}
+      {/* Dropzone — Audio */}
+      {activeTab === 'audio' && (
+        <Dropzone
+          getRootProps={getAudioProps}
+          getInputProps={getAudioInput}
+          isDragActive={audioDrag}
+          file={audioFile}
+          onClear={() => setAudioFile(null)}
+          emoji="🎵"
+          label="Drag & drop audio file"
+          hint="MP3 · WAV · M4A · AAC · OGG · FLAC"
+          formatSize={formatSize}
+        />
+      )}
+
+      {/* Dropzone — Short Video */}
+      {activeTab === 'video' && (
+        <Dropzone
+          getRootProps={getVideoProps}
+          getInputProps={getVideoInput}
+          isDragActive={videoDrag}
+          file={videoFile}
+          onClear={() => setVideoFile(null)}
+          emoji="🎥"
+          label="Drag & drop video file"
+          hint="MP4 · MOV · WebM · AVI · MKV"
+          formatSize={formatSize}
+        />
+      )}
+
+      {/* Dropzone — Long Video (Bunny) */}
+      {activeTab === 'long' && (
+        <Dropzone
+          getRootProps={getLongProps}
+          getInputProps={getLongInput}
+          isDragActive={longDrag}
+          file={longFile}
+          onClear={() => setLongFile(null)}
+          emoji="🎬"
+          label="Drag & drop long video file"
+          hint="MP4 · MOV · WebM · AVI · MKV · M4V — no size limit via Bunny Stream"
+          formatSize={formatSize}
+          accentColor="cosmos"
+        />
+      )}
+
+      {/* Upload progress */}
+      <AnimatePresence>
+        {uploading && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="space-y-3"
+          >
+            <div className="flex items-center gap-2 text-sm text-aurora">
+              <div className="w-3 h-3 border-2 border-aurora border-t-transparent rounded-full animate-spin flex-shrink-0" />
+              {uploadStage}
+            </div>
+            {thumbFile && thumbProgress > 0 && (
+              <ProgressBar label="Thumbnail" value={thumbProgress} />
+            )}
+            {currentProgress > 0 && (
+              <ProgressBar
+                label={activeTab === 'audio' ? 'Audio' : activeTab === 'video' ? 'Video' : 'Long Video (Bunny)'}
+                value={currentProgress}
+                accent={activeTab === 'long' ? 'cosmos' : 'aurora'}
+              />
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Form fields */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-1 md:col-span-2">
+          <label className="text-sm text-twilight">Title *</label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Enter media title"
+            disabled={uploading}
+            className="input-field disabled:opacity-50"
           />
         </div>
 
-        <div
-          className="flex items-center gap-3 px-4 py-3 cursor-pointer"
-          onClick={() => setShowFullPlayer(true)}
-        >
-          {/* Thumbnail */}
-          <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 relative">
-            {currentMedia.thumbnailUrl ? (
-              <img src={currentMedia.thumbnailUrl} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full bg-gradient-to-br from-nebula to-aurora" />
-            )}
-            {isPlaying && (
-              <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-                <div className="flex items-end gap-0.5">
-                  {[1, 2, 3].map((i) => (
-                    <div
-                      key={i}
-                      className="w-0.5 bg-white rounded-full animate-pulse"
-                      style={{ height: `${4 + i * 2}px`, animationDelay: `${i * 0.15}s` }}
-                    />
-                  ))}
-                </div>
+        <div className="space-y-1 md:col-span-2">
+          <label className="text-sm text-twilight">Description</label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Describe this session…"
+            rows={3}
+            disabled={uploading}
+            className="input-field resize-none disabled:opacity-50"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-sm text-twilight">Category</label>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            disabled={uploading}
+            className="input-field disabled:opacity-50"
+          >
+            {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+
+        {/* Thumbnail — shown for all tabs */}
+        <div className="space-y-1">
+          <label className="text-sm text-twilight">
+            Thumbnail {activeTab === 'long' ? '(recommended)' : '(optional)'}
+          </label>
+          <div
+            {...getThumbProps()}
+            className={`border-2 border-dashed rounded-xl p-4 cursor-pointer transition-all text-center ${
+              thumbDrag ? 'border-aurora bg-aurora/5' : 'border-dusk hover:border-twilight'
+            } ${uploading ? 'pointer-events-none opacity-50' : ''}`}
+          >
+            <input {...getThumbInput()} />
+            {thumbPreview ? (
+              <div className="relative">
+                <img
+                  src={thumbPreview}
+                  alt="Thumbnail"
+                  className="w-full h-20 object-cover rounded-lg"
+                />
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setThumbFile(null);
+                    setThumbPreview('');
+                  }}
+                  className="absolute top-1 right-1 bg-black/70 rounded-full p-1"
+                >
+                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
               </div>
+            ) : (
+              <p className="text-twilight text-sm py-2">
+                {activeTab === 'long' ? '📸 Add cover image (shown in library)' : 'Add cover image'}
+              </p>
             )}
-          </div>
-
-          {/* Title */}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-star truncate">{currentMedia.title}</p>
-            <p className="text-xs text-twilight truncate">{currentMedia.category}</p>
-          </div>
-
-          {/* Mini controls */}
-          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-            <button onClick={prevTrack} className="text-moon hover:text-star p-2">
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
-              </svg>
-            </button>
-            <button
-              onClick={togglePlay}
-              className="w-10 h-10 rounded-full bg-white flex items-center justify-center hover:scale-105 transition-transform"
-            >
-              {isPlaying ? (
-                <svg className="w-4 h-4 text-void" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4 text-void ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              )}
-            </button>
-            <button onClick={nextTrack} className="text-moon hover:text-star p-2">
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
-              </svg>
-            </button>
           </div>
         </div>
-      </motion.div>
-    </>
+      </div>
+
+      {/* Submit */}
+      <motion.button
+        onClick={handleUpload}
+        disabled={uploading || !currentFile || !title.trim()}
+        whileTap={{ scale: 0.98 }}
+        className="btn-primary w-full disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+      >
+        {uploading ? (
+          <>
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            {uploadStage || 'Uploading…'}
+          </>
+        ) : (
+          activeTab === 'audio'
+            ? 'Upload Audio to Sanctuary'
+            : activeTab === 'video'
+            ? 'Upload Video to Sanctuary'
+            : '🎬 Upload Long Video via Bunny Stream'
+        )}
+      </motion.button>
+    </div>
+  );
+}
+
+// ── Sub-components ─────────────────────────────────────────────────────────
+
+interface DropzoneProps {
+  getRootProps: () => any;
+  getInputProps: () => any;
+  isDragActive: boolean;
+  file: File | null;
+  onClear: () => void;
+  emoji: string;
+  label: string;
+  hint: string;
+  formatSize: (b: number) => string;
+  accentColor?: 'aurora' | 'cosmos';
+}
+
+function Dropzone({
+  getRootProps, getInputProps, isDragActive, file, onClear,
+  emoji, label, hint, formatSize, accentColor = 'aurora',
+}: DropzoneProps) {
+  const accent = accentColor === 'cosmos' ? 'border-cosmos bg-cosmos/5' : 'border-aurora bg-aurora/5';
+  const success = accentColor === 'cosmos' ? 'border-cosmos/50 bg-cosmos/5' : 'border-green-500/50 bg-green-500/5';
+
+  return (
+    <div
+      {...getRootProps()}
+      className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all duration-200 ${
+        isDragActive ? accent :
+        file ? success :
+        'border-dusk hover:border-twilight hover:bg-mist/30'
+      }`}
+    >
+      <input {...getInputProps()} />
+      {file ? (
+        <div className="flex items-center justify-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center flex-shrink-0">
+            <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <div className="text-left min-w-0">
+            <p className="text-star text-sm font-medium truncate">{file.name}</p>
+            <p className="text-twilight text-xs">{formatSize(file.size)}</p>
+          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); onClear(); }}
+            className="ml-4 text-twilight hover:text-star"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="text-4xl mb-3">{emoji}</div>
+          <p className="text-star font-medium">{label}</p>
+          <p className="text-twilight text-sm mt-1">or click to browse</p>
+          <p className="text-dusk text-xs mt-2">{hint}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+interface ProgressBarProps {
+  label: string;
+  value: number;
+  accent?: 'aurora' | 'cosmos';
+}
+
+function ProgressBar({ label, value, accent = 'aurora' }: ProgressBarProps) {
+  const fill = accent === 'cosmos'
+    ? 'bg-gradient-to-r from-cosmos to-cosmos-light'
+    : 'bg-gradient-to-r from-nebula to-aurora';
+
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs text-twilight">
+        <span>{label}</span>
+        <span className={accent === 'cosmos' ? 'text-cosmos font-medium' : 'text-aurora font-medium'}>
+          {value}%
+        </span>
+      </div>
+      <div className="progress-bar">
+        <motion.div
+          className={`h-full rounded-full transition-all duration-100 ${fill}`}
+          animate={{ width: `${value}%` }}
+          transition={{ duration: 0.3 }}
+        />
+      </div>
+    </div>
   );
 }
