@@ -276,7 +276,7 @@ export default function AudioPlayer() {
         animate={{ y: 0 }}
         exit={{ y: 100 }}
         transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-        className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/10"
+        className="fixed bottom-0 left-0 right-0 z-[999] border-t border-white/10"
         style={{ background: 'rgba(7,7,15,0.97)' }}
       >
         {/* Progress line */}
