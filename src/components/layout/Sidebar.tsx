@@ -53,9 +53,9 @@ export default function Sidebar() {
 
   return (
     <div
-      className="h-full flex flex-col py-6 px-4 border-r border-white/[0.06]"
+      className="h-full flex flex-col py-6 px-4 border-r border-white/10"
       style={{
-        background: 'rgba(255,255,255,0.015)',
+        background: 'rgba(7, 5, 20, 0.85)',
         backdropFilter: 'blur(24px) saturate(180%)',
         WebkitBackdropFilter: 'blur(24px) saturate(180%)',
         boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.2), inset 0 -1px 1px rgba(0,0,0,0.15), 1px 0 20px rgba(0,0,0,0.3)',
