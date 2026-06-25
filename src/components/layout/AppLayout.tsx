@@ -182,7 +182,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Cosmic Background */}
       <CosmicBackground />
 
-      {/* Mobile overlay — z-30 */}
+      {/* Mobile overlay — z-40 (above content, below sidebar) */}
       <AnimatePresence>
         {sidebarOpen && (
           <motion.div
@@ -190,20 +190,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setSidebarOpen(false)}
-            className="fixed inset-0 bg-black/60 z-20 lg:hidden"
+            className="fixed inset-0 bg-black/70 z-40 lg:hidden"
           />
         )}
       </AnimatePresence>
 
-      {/* Sidebar — z-20 (BELOW audio player) */}
+      {/* Sidebar — z-50 on mobile so it slides OVER the overlay */}
       <div className={`
-        fixed inset-y-0 left-0 z-10 w-64 transform transition-transform duration-300 lg:relative lg:translate-x-0
+        fixed inset-y-0 left-0 z-50 w-64 transform transition-transform duration-300 lg:relative lg:z-10 lg:translate-x-0
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
         <Sidebar />
       </div>
 
-      {/* Main — z-10 */}
+      {/* Main content */}
       <div className="relative z-10 flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Mobile header */}
         <div
@@ -228,10 +228,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {children}
         </main>
 
-        {/* Audio Player — z-50 (ABOVE everything including sidebar) */}
+        {/* Audio Player — z-[999] always on top */}
         <AnimatePresence>
           {showPlayer && currentMedia?.type === 'audio' && (
-            <div className="fixed bottom-0 left-0 right-0 z-50">
+            <div className="fixed bottom-0 left-0 right-0 z-[999]">
               <AudioPlayer />
             </div>
           )}
